@@ -1,0 +1,319 @@
+---
+title: "BA Project"
+author: "ZHENG JINCAI"
+date: "2019年6月4日"
+output: word_document
+---
+
+```{r }
+#######Data Preprocessing
+RP<-read.csv('OnlineNewsPopularity.csv')
+
+###drop url, which is not useful
+RP<-RP[c(-1,-2)]
+RP2<-RP
+
+###F1
+summary(RP$shares)
+
+###F2
+library(ggplot2)
+ggplot(data=RP[RP$shares<3395,])+geom_histogram(aes(shares),col='gray',fill='blue',alpha=0.7,bins=100)
+
+##see whether those dummies have impact on the result
+RPNames<-names(RP2)
+dummyIndex.plot<-c()
+for (i in 1:length(RPNames) ){
+        a<-min(RP2[RPNames[i]])==0
+        b<-max(RP2[RPNames[i]])==1
+        c<-quantile(RP2[[RPNames[i]]],0.25)==0
+        d<-(quantile(RP2[[RPNames[i]]],0.75)==0)|(quantile(RP2[[RPNames[i]]],0.75)==1)
+        if (a&b&c&d){
+              dummyIndex.plot<-c(dummyIndex.plot,i)
+        }
+}
+dummyIndex.plot
+
+##integrate the data channel
+RP2$dataChannel<-0
+RPNames[dummyIndex.plot][1:6]
+for (i in 1:6){
+        RP2$dataChannel<-RP2$dataChannel+as.numeric(RP2[RPNames[dummyIndex.plot][i]]==1)*i
+}
+num.Channel<-RP2$dataChannel
+
+RP2$dataChannel<-gsub(1,'life style',RP2[['dataChannel']])
+RP2$dataChannel<-gsub(2,'entertainment',RP2[['dataChannel']])
+RP2$dataChannel<-gsub(3,'bus',RP2[['dataChannel']])
+RP2$dataChannel<-gsub(4,'socmed',RP2[['dataChannel']])
+RP2$dataChannel<-gsub(5,'tech',RP2[['dataChannel']])
+RP2$dataChannel<-gsub(6,'world',RP2[['dataChannel']])
+
+##integrate the weekdays
+RP2$weekDay<-0
+RPNames[dummyIndex.plot][7:13]
+for (i in 7:13){
+        RP2$weekDay<-RP2$weekDay+as.numeric(RP2[RPNames[dummyIndex.plot][i]]==1)*(i-6)
+}                                                   
+RP2$weekDay
+
+###F3
+ggplot(data=RP2[RP$shares<quantile(RP[['shares']],0.9),],aes(x=weekDay,y=shares))+geom_boxplot(aes(group=weekDay,fill=as.character(weekDay)),color='gray')+ggtitle(label='Boxplot of popular on Weekdays')
+
+###F4
+ggplot(data=RP2[RP$shares<quantile(RP[['shares']],0.9),],aes(x=dataChannel,y=shares))+geom_boxplot(aes(group=dataChannel,fill=dataChannel),color='gray')+ggtitle(label='Boxplot of popular on Channels')
+
+##make a correlation matrxi plot
+library(corrplot)
+RP2$dataChannel<-num.Channel
+rquery.cormat(RP2[-dummyIndex.plot])
+
+###apply simple regression model to it
+## but first scale the data
+RP.try<-RP
+RP.try.s<-RP
+dummyIndex.try<-dummyIndex.plot
+
+##scaling
+for ( i in c((1:(length(RPNames.try)))[!RPNames%in%RPNames[dummyIndex.try]]) ){
+        RP.try.s[i]<-scale(RP[i],center=TRUE,scale=TRUE)
+}
+RP.try.s$shares<-RP.try$shares
+
+IQR1.5<-(quantile(RP.try.s$shares,0.75)+1.5*(quantile(RP.try.s$shares,0.75)-quantile(RP.try.s$shares,0.25)))
+
+try.fit<-lm(shares~.,data=RP.try.s[RP.try.s$shares<IQR1.5,])
+summary(try.fit)
+
+##got adjusted R-squared value at only 0.02172
+try.fit.select<-lm(shares~n_tokens_content+num_hrefs +num_self_hrefs +average_token_length+num_keywords+ data_channel_is_lifestyle +data_channel_is_entertainment+data_channel_is_bus +data_channel_is_socmed +data_channel_is_tech +kw_min_min+kw_max_min+kw_avg_min+ kw_min_max+kw_max_max+kw_avg_max +kw_min_avg  +kw_max_avg+kw_avg_avg+weekday_is_monday +weekday_is_tuesday +weekday_is_wednesday+weekday_is_thursday +weekday_is_friday+ LDA_00 +LDA_01+LDA_02+ LDA_03  +global_subjectivity+min_positive_polarity +max_positive_polarity+title_subjectivity +title_sentiment_polarity+abs_title_subjectivity ,data=RP.try.s[RP.try.s$shares<IQR1.5,])
+summary(try.fit.select)
+
+##got adjusted R-squared value at only 0.0197
+
+##PCA
+library(FactoMineR)
+
+RP.pca2<-PCA(RP.try.s[RP.try.s$shares<IQR1.5,-59],ncp=58,scale.unit = FALSE)
+View(RP.pca2$eig)
+try.pca<-as.data.frame(RP.pca2$ind$coord[,1:25])
+try.pca$shares<-RP.try.s[RP.try.s$shares<IQR1.5,][['shares']]
+head(try.pca)
+
+try.pca.fit<-lm(shares~.,data=try.pca)
+summary(try.pca.fit)
+
+```
+
+```{r preprocessing}
+##scale the data
+RP.s<-RP
+divide<-median(RP[[grep('^shares',names(RP.s))]])
+RP.s['popular']<-as.numeric(RP['shares']>divide)
+RP.s<-RP.s[-grep('^shares',names(RP.s))]
+
+RPNames.s<-names(RP.s)
+
+dummyIndex<-c(dummyIndex.try,length(RPNames.s))
+
+#scaling-- mean as center and devide by standard deviation
+for ( i in c((1:length(RPNames))[!RPNames.s%in%RPNames.s[dummyIndex]]) ){
+        RP.s[i]<-scale(RP.s[i],center=TRUE,scale=TRUE)
+}
+summary(RP.s)
+```
+
+```{r knn}
+news<-RP.s
+##train-test split
+set.seed(100)
+smp_size<-floor(0.7*nrow(news))
+train_ind<-sample(seq_len(nrow(news)),size = smp_size)
+train.popular<-news[train_ind,"popular"]
+test.popular<-news[-train_ind,"popular"]
+train.data<--news[train_ind,-59]
+test.data<--news[-train_ind,-59]
+
+##knn
+library(class)
+
+accuracy<-rep(0,10)
+for (i in c(1:10)){
+  prediction<-knn(train.data, test.data, train.popular, k=i)
+  accuracy[i]<-mean(prediction==test.popular)
+}
+which.max(accuracy)
+
+knn_news<-knn(train.data, test.data, train.popular, k=which.max(accuracy), prob=TRUE)
+table(prediction,test.popular)
+mean(prediction==test.popular)
+prob <- attr(knn_news, "prob")
+
+library(pROC)
+knn.roc<-roc(test.popular,prob )
+plot(knn.roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1,0.2) ,max.auc.polygon=TRUE, print.thres=TRUE)
+```
+
+```{r Logistic Rgression}
+attach(RP.s)
+
+#Because of singularity, delete weekday_is_sunday and is_weekend:
+prepared.lr<-RP.s[,c(-36,-37)]
+
+#Logistic Model:
+set.seed(100)
+smp_size=floor(0.7*nrow(news))
+train_index=sample(seq_len(nrow(news)),size = smp_size)
+x.test=prepared.lr[-train_index,]
+y.test=popular[-train_index]
+
+glm.fit=glm(popular~.,family=binomial,data=prepared.lr,subset=train_index)
+summary(glm.fit)
+
+glm.probs=predict(glm.fit,x.test,type="response")
+glm.pred=rep(0,length(y.test))
+glm.pred[glm.probs>0.4]=1
+
+table(glm.pred,y.test)
+mean(glm.pred==y.test)
+
+
+##keep significant variables
+glm.formula.select<-paste(c('popular',paste(names(prepared.lr)[c(2,6,7,10:16,18:26,30:35,41,53:55)],collapse = '+')),collapse = '~')
+glm.formula.select<-as.formula(glm.formula.select)
+glm.fit.select=glm(glm.formula.select,family=binomial,data=prepared.lr,subset=train_index)
+summary(glm.fit.select)
+
+glm.probs.select=predict(glm.fit.select,x.test,type="response")
+glm.pred.select=rep(0,length(y.test))
+glm.pred.select[glm.probs.select>0.5]=1
+
+table(glm.pred.select,y.test)
+mean(glm.pred.select==y.test)
+
+#ROC and AUC for LR
+LR.roc<-roc(y.test,glm.probs.select)
+plot(LR.roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1,0.2) ,max.auc.polygon=TRUE, print.thres=TRUE)
+```
+
+```{r LASSO}
+#Lasso Model:
+library(glmnet)
+
+x0=model.matrix(popular~.,RP.s)
+x=x0[,-1]
+y=popular
+
+set.seed(100)
+smp_size=floor(0.7*nrow(news))
+train=sample(seq_len(nrow(news)),size = smp_size)
+x.train=x[train,]
+y.train=y[train]
+x.test=x[-train,]
+y.test=y[-train]
+
+lasso.fit=glmnet(x.train,y.train,family="binomial")
+cvfit=cv.glmnet(x.train,y.train,family="binomial",type="class")
+
+lasso.pred<-predict(cvfit,newx=x.test,s="lambda.min",type="class")
+lasso.prob<-predict(cvfit,newx=x.test,s="lambda.min",type="response")
+
+mean(lasso.pred[,1]==y.test)
+table(lasso.pred[,1],y.test)
+
+##ROC and AUC
+lasso.pred<-as.numeric(lasso.prob)
+lasso.roc<-roc(y.test,lasso.pred)
+plot(lasso.roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1,0.2) ,max.auc.polygon=TRUE, print.thres=TRUE)
+```
+
+```{r svm}
+news<-RP.s
+detach(RP.s)
+attach(news)
+set.seed(100)
+train=sample(1:nrow(news),nrow(news)*0.5)
+y.test=news[-train,'popular']
+
+library(e1071)
+
+news.svm=svm(popular~.,data = news,type='C-classification',subset = train,kernel='linear',probability = TRUE)
+pred.svm=predict(news.svm,news[-train,])
+table(pred.svm,y.test)
+mean(pred.svm==y.test)
+
+## ROC
+svm.probility=predict(news.svm,news[-train,],probability=TRUE,decision.values=TRUE)
+prob.svm=attr(svm.probility,'probabilities')[,2]
+
+svm.roc=roc(y.test,prob.svm)
+plot(svm.roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1,0.2) ,max.auc.polygon=TRUE, print.thres=TRUE)
+```
+
+```{r gbm}
+##get news as a new data frame
+news<-RP.s
+
+set.seed(100)
+
+smp_size=floor(0.7*nrow(news))
+train_index=sample(seq_len(nrow(news)),size = smp_size)
+train<-news[train_index,]
+test<-news[-train_index,]
+
+library(gbm)
+
+set.seed(100)
+shi<-seq(0.1,1,0.1)
+depth=c(1,2,3)
+accuracy<-data.frame(matrix(0,nrow=10,ncol=3))
+for (s in 1:length(shi)){
+        for (i in depth){
+               news.gbm<-gbm(popular ~.,distribution = "bernoulli",data=train,n.trees = 500,shrinkage = shi[s],interaction.depth = i)
+                news.gbm.prob<-predict(news.gbm,newdata=test,n.trees =news.gbm$n.trees,type = "response")
+                accuracy[s,i]<-mean(round(news.gbm.prob)==test$popular) 
+        }
+}
+x<-which(max(accuracy)==accuracy)[1]
+if (x> dim(accuracy)[1]){
+        a<-dim(accuracy)[1]
+        x<-which((accuracy[((x-x%%a)/a)+1]==max(accuracy)))[1]
+}
+y<-which(accuracy[x,]==max(accuracy))[1]
+accuracy[x,y]
+
+news.gbm<-gbm(popular ~.,distribution = "bernoulli",data=train,n.trees = 500,shrinkage = shi[x],interaction.depth = y)
+news.gbm.prob<-predict(news.gbm,newdata=test,n.trees =news.gbm$n.trees,type = "response")
+
+table(round(news.gbm.prob),test$popular)
+
+news.gbm.roc <- roc(test$popular,news.gbm.prob)
+plot(news.gbm.roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1,0.2) ,max.auc.polygon=TRUE, print.thres=TRUE)
+```
+
+```{r randomForest}
+news<-RP.s
+
+set.seed(100)
+##transfer 0 and 1 to yes and no for classification
+news['popular']<-gsub(0,'no',news[['popular']])
+news['popular']<-gsub('1','yes',news[['popular']])
+news['popular']<-as.factor(news$popular)
+
+smp_size<-floor(0.5*nrow(news))
+train_ind<-sample(seq_len(nrow(news)),size = smp_size)
+train<-news[train_ind,]
+test<-news[-train_ind,]
+
+library(randomForest)
+news.rf<-randomForest(train,y=train$popular,ntree=100,nPerm=10,mtry=3,proximity=TRUE,importance=TRUE,type='classification')
+plot(news.rf)
+news.rf.pred<-predict(news.rf,test,type = "class")
+news.rf.prob<-predict(news.rf,test,type="prob")
+table(news.rf.pred,test$popular)
+mean(news.rf.pred==test$popular)
+
+###ROC
+news.rf.roc <- roc(test$popular,news.rf.prob[,2])
+plot(news.rf.roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1,0.2) ,max.auc.polygon=TRUE, print.thres=TRUE)
+```
